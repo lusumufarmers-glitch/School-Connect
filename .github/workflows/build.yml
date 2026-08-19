@@ -1,0 +1,124 @@
+name: Build Damis APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build Damis Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find and extract Damis project
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: Damis ZIP file was not found."
+            exit 1
+          fi
+
+          echo "Using ZIP: $ZIP_FILE"
+
+          rm -rf damis
+          mkdir -p damis
+
+          unzip -q -o "$ZIP_FILE" -d damis
+
+          echo "Damis project extracted."
+
+      - name: Locate Android project
+        shell: bash
+        run: |
+          set -e
+
+          ANDROID_DIR=$(find damis \
+            -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -exec dirname {} \; | head -n 1)
+
+          if [ -z "$ANDROID_DIR" ]; then
+            echo "ERROR: Android Gradle project was not found."
+            echo "Searching extracted files:"
+            find damis -maxdepth 6 -type f | sort
+            exit 1
+          fi
+
+          echo "Android project found at:"
+          echo "$ANDROID_DIR"
+
+          echo "ANDROID_DIR=$ANDROID_DIR" >> "$GITHUB_ENV"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Check Android project
+        shell: bash
+        run: |
+          set -e
+
+          echo "Project directory:"
+          cd "$ANDROID_DIR"
+
+          echo ""
+          echo "Project files:"
+          ls -la
+
+          if [ ! -f "settings.gradle" ] && [ ! -f "settings.gradle.kts" ]; then
+            echo "ERROR: settings.gradle was not found."
+            exit 1
+          fi
+
+          if [ ! -f "build.gradle" ] && [ ! -f "build.gradle.kts" ]; then
+            echo "ERROR: build.gradle was not found."
+            exit 1
+          fi
+
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          set -e
+
+          cd "$ANDROID_DIR"
+
+          echo "Building Damis APK..."
+
+          gradle assembleDebug --no-daemon --stacktrace
+
+          echo "APK build completed."
+
+      - name: Find APK
+        shell: bash
+        run: |
+          set -e
+
+          echo "Searching for APK files..."
+
+          find "$ANDROID_DIR" \
+            -type f \
+            -path "*/build/outputs/apk/debug/*.apk" \
+            -print
+
+      - name: Upload Damis APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Damis-APK
+          path: "**/build/outputs/apk/debug/*.apk"
+          if-no-files-found: error
